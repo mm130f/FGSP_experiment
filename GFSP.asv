@@ -1,0 +1,258 @@
+function GFSP(subject, condition, train, nrun)
+
+%% SET PARAMETERS
+
+condition       =           strfind('GFSP', condition);
+events= 4;
+trial_dur = 8;
+event_dur = trial_dur/events;
+time_to_beep = 0.5;
+gitter = 0.5;
+gray_dur = 0.3;
+if train=='E'
+    initial_blank   =           5;                           % 20
+    repetitions     =           4;                           % 15 repetitions for the experiment
+    if condition==4
+        repetitions = repetitions+1;
+    end
+    rest_dur   =                2;                            % 10
+
+else 
+    initial_blank   =           0;                           
+    repetitions     =           2;                          
+    rest_dur        =           2;                           
+end 
+
+%% GET FILES
+
+clock_im = imread('clock.png');
+[y,freq]                =     wavread('one_beep.wav');%createBeep(1000,0.4,0.1);
+[odd,freq]              =     wavread('one_beep_odd.wav');%createBeep(300,0.4,0.2);
+audio_mat                 =     [0 1; 1 0; 0 0; 1 0];     % rows for conditions (GFSP), first 
+                                                         % column for
+                                                         % trigger and
+                                                         % second for
+                                                         % response
+oddballs = ones(repetitions,events);
+if condition==4
+    if train=='E'
+        oddballs(4+nrun,2)=3;
+    else
+        oddballs(1,2)=3;
+    end
+end
+
+%% LOG
+rt_sub = cell(repetitions+1,2);
+rt_sub{1,1} = 'response';
+rt_sub{1,2} = 'all presses';
+
+%%  INITIALIZE PTB
+
+% Here we call some default settings for setting up Psychtoolbox
+PsychDefaultSetup(2); 
+
+% Get the screen numbers
+screens = Screen('Screens');
+
+% Draw to the external screen if avaliable
+screenNumber = max(screens);
+
+% Define black and white
+white = WhiteIndex(screenNumber);
+black = BlackIndex(screenNumber);
+grey = white / 2;
+inc = white - grey;
+
+% Open an on screen window
+[window, windowRect] = PsychImaging('OpenWindow', screenNumber, black);
+
+% hide cursor
+HideCursor;
+
+% Get the size of the on screen window
+[screenXpixels, screenYpixels] = Screen('WindowSize', window);
+
+% Query the frame duration
+ifi = Screen('GetFlipInterval', window);
+
+% The avaliable keys to press
+escKey          =           KbName('ESCAPE');
+t               =           KbName('t');
+
+% Retreive the maximum priority number
+topPriorityLevel = MaxPriority(window);
+
+% Get the centre coordinate of the window
+[xCenter, yCenter] = RectCenter(windowRect);
+
+% Set up alpha-blending for smooth (anti-aliased) lines
+Screen('BlendFunction', window, 'GL_SRC_ALPHA', 'GL_ONE_MINUS_SRC_ALPHA');
+
+% compute the rotation angle per flip
+theta = pi*2*ifi/event_dur;
+
+%compute the rotation matrix
+rotation_mat = [cos(theta) -sin(theta); sin(theta) cos(theta)];
+
+% Numer of frames to wait when specifying good timing
+waitframes = 1;
+
+% Draw text in the middle of the screen in Courier in white
+Screen('TextSize', window, 30);
+Screen('TextFont', window, 'Courier');
+DrawFormattedText(window, 'The experiment will begin shortly', 'center', 'center', white);
+vbl = Screen('Flip', window);
+HideCursor;
+t_pressed = false;
+while t_pressed == false
+    [keyIsDown,secs, keyCode] = KbCheck;
+    if keyCode(t)
+        t_pressed = true;
+    end
+    if keyCode(escKey)
+        Screen('CloseAll');
+        clear all
+        return
+    end
+end
+DisableKeysForKbCheck(t);
+
+% Draw the fixation cross in white, set it to the center of our screen and
+Screen('DrawLines', window, [-40 40 0 0; 0 0 -40 40],...
+    4, white, [xCenter yCenter], 2);
+Screen('Flip', window);
+HideCursor;
+start = tic;
+just_pressed = 0;
+
+%% EXPERIMENT STARTS NOW
+
+while toc(start)<initial_blank
+    [keyIsDown,secs, keyCode] = KbCheck;
+ if keyCode(escKey)
+        Screen('CloseAll');
+        clear all
+        return
+    end
+end
+
+for rep = 1:repetitions
+    toc(start)
+    Priority(topPriorityLevel);
+    
+    
+    response = zeros(events,3);
+    all_presses = [];
+    trial = tic;
+    % Make the image into a texture
+    imageTexture = Screen('MakeTexture', window, clock_im);
+
+    % Prepare audio
+    InitializePsychSound(1);
+    pahandle = PsychPortAudio('Open', [], [], 2, freq, 1, 0); 
+    PsychPortAudio('FillBuffer', pahandle,y'); 
+
+    % vbl = Screen('Flip', window);
+    for event=1:events
+        toc(trial)
+        % set initial hand end coordinates
+        hand_vec = [0; -150];
+        temporal_delay = time_to_beep+rand*gitter;
+        delay_angle = temporal_delay*180;
+        entered_gray = 0;
+        responded = 0;
+        cur_event = tic;
+        if oddballs(rep,event) == 3
+                PsychPortAudio('FillBuffer', pahandle,odd'); 
+        end
+        while toc(trial)<2*event 
+
+            if toc(cur_event)>temporal_delay && entered_gray==0
+                entered_gray=1;
+                if audio_mat(condition, 1) == 1
+                    PsychPortAudio('Start', pahandle, ...
+                    1,0); %starts sound immediatley
+                end
+                response(event,1) = toc(trial);
+            end
+            
+            [keyIsDown,secs, keyCode] = KbCheck;
+            if keyIsDown 
+                just_pressed = 1;
+            else
+                if just_pressed = 1
+                    
+                if audio_mat(condition,2)==1
+                    PsychPortAudio('Start', pahandle, 1,0); %starts sound immediatley
+                end 
+                all_presses = [all_presses; toc(trial)];
+                if responded == 0
+                    response(event,2) = toc(trial);
+                end
+                if keyCode(escKey)
+                    Screen('CloseAll');
+                    clear all
+                    return
+                end
+            end
+           
+            %draw clock
+            Screen('DrawTexture', window, imageTexture, [], [], delay_angle);
+
+            % draw hand
+            Screen('DrawLine',window,[1, 0.5, 0.5], xCenter, yCenter, hand_vec(1)+xCenter ,hand_vec(2)+yCenter, 3);
+
+            % draw circle
+            Screen('DrawDots', window, [xCenter yCenter], 35, [1 1 1], [], 2);
+
+            % Tell PTB no more drawing commands will be issued until the next flip
+            Screen('DrawingFinished', window);
+
+            % Flip to the screen
+            vbl = Screen('Flip', window, vbl + (waitframes - 0.5) * ifi);
+
+            % Rotate hand
+            hand_vec = rotation_mat*hand_vec;
+
+        end
+        if oddballs(rep,event) == 3
+            PsychPortAudio('FillBuffer', pahandle,y'); 
+        end
+    end
+    
+    Screen('DrawLines', window, [-40 40 0 0; 0 0 -40 40],...
+    4, white, [xCenter yCenter], 2);
+    Screen('Flip', window);
+    HideCursor;
+   
+    while toc(start)<initial_blank+rep*(rest_dur+trial_dur)
+        [keyIsDown,secs, keyCode] = KbCheck;
+        if keyCode(escKey)
+            Screen('CloseAll');
+            clear all
+            return
+        end
+    end
+    Priority(0);
+
+    %% WRITE TO LOG
+    
+    response(:,3) = response(:,2)-response(:,1);
+    rt_sub{rep+1,1} = response;
+    rt_sub{rep+1,2} = all_presses;
+    
+end
+toc(start)
+
+%% SAVE LOG TO FILE
+
+if train=='E'
+    c = clock;
+    conditions = 'GFSP';
+    filename = (['subject_' subject '_' '_cond_' conditions(condition) '_num_' num2str(nrun) '_' num2str(c(4))  num2str(c(5))]);
+    save(filename,'rt_sub');
+end
+
+sca
+end
